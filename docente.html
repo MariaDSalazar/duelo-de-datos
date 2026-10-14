@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duelo de Datos · Pantalla del anfitrión</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body class="host">
+<div class="fondo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<button id="mudo" class="mudo" aria-label="Silenciar o activar sonido"></button>
+<main>
+  <section id="v-clave" hidden>
+    <h1 class="sello">Duelo de Datos</h1>
+    <form id="f-clave" class="panel">
+      <label>Clave del anfitrión<input id="c-clave" type="password" autocomplete="off" required></label>
+      <p id="c-err" class="err" role="alert"></p>
+      <button class="btn">Abrir</button>
+    </form>
+  </section>
+
+  <section id="v-config" hidden>
+    <h1 class="sello">Duelo de Datos</h1>
+    <p class="sub">Bases de datos y modelo relacional</p>
+    <div class="panel">
+      <label>Bloque
+        <select id="bloque">
+          <option value="todas">Todos los temas</option>
+          <option value="1">Bases de datos y sus usuarios</option>
+          <option value="2">Modelos, esquemas y arquitectura</option>
+          <option value="3">Modelo relacional y E-R</option>
+        </select>
+      </label>
+      <label>Preguntas
+        <select id="cantidad"><option>10</option><option selected>15</option><option>20</option></select>
+      </label>
+      <p id="disponibles" class="tenue"></p>
+      <button id="crear" class="btn" disabled>Crear sala</button>
+      <button id="retomar" class="btn btn-sec" hidden></button>
+    </div>
+  </section>
+
+  <section id="v-lobby" hidden>
+    <div class="lobby">
+      <div class="acceso">
+        <p class="tenue">Entra desde tu celular</p>
+        <p id="enlace" class="enlace"></p>
+        <img id="qr" alt="Código QR de la sala">
+        <p class="tenue">PIN de la sala</p>
+        <p id="pin" class="pin"></p>
+      </div>
+      <div class="sala">
+        <div class="sala-cab"><h2><span id="njug">0</span> en la sala</h2><button id="empezar" class="btn" disabled>Empezar</button></div>
+        <p class="tenue">Toca un nombre para retirarlo de la sala.</p>
+        <ul id="chips" class="chips"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="v-intro" hidden>
+    <p id="i-num" class="num"></p>
+    <p id="i-doble" class="sello doble" hidden>Doble puntaje</p>
+    <h2 id="i-texto" class="enunciado"></h2>
+    <div class="carga"><i></i></div>
+  </section>
+
+  <section id="v-pregunta" hidden>
+    <div class="barra">
+      <span id="p-num" class="num"></span>
+      <span id="p-doble" class="chip-doble" hidden>Doble puntaje</span>
+      <span class="resp"><b id="p-resp">0</b> respuestas</span>
+      <button id="saltar" class="btn btn-sec btn-chico">Cerrar pregunta</button>
+    </div>
+    <h2 id="p-texto" class="enunciado"></h2>
+    <div class="reloj"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44"/><circle id="p-arco" cx="50" cy="50" r="44" pathLength="100"/></svg><b id="p-seg"></b></div>
+    <div id="p-ops" class="ops"></div>
+  </section>
+
+  <section id="v-revelar" hidden>
+    <h2 id="r-texto" class="enunciado chico"></h2>
+    <div id="r-barras" class="barras"></div>
+    <div class="explica"><p id="r-acertaron" class="acertaron"></p><p id="r-exp"></p></div>
+    <button id="r-sig" class="btn sig"></button>
+  </section>
+
+  <section id="v-ranking" hidden>
+    <h1 class="sello">Ranking</h1>
+    <ol id="k-lista" class="rank"></ol>
+    <button id="k-sig" class="btn sig">Siguiente pregunta</button>
+  </section>
+
+  <section id="v-final" hidden>
+    <h1 class="sello">Podio</h1>
+    <div id="podio" class="podio"></div>
+    <table id="resto" class="resto" hidden><thead><tr><th>Puesto</th><th>Participante</th><th>Aciertos</th><th>Puntos</th></tr></thead><tbody></tbody></table>
+    <div class="acciones"><button id="csv" class="btn btn-sec">Descargar resultados (CSV)</button><button id="nueva" class="btn">Nueva partida</button></div>
+  </section>
+</main>
+
+<script type="module">
+import { entrar, r, set, get, update, onValue, serverTimestamp, ahora, $, esc, mostrar, barajar, duracion, claseOp, forma, ranking, sonar, musica, botonMudo, confeti } from './comun.js';
+import { FLECHA, LLAMA } from './arte.js';
+import { BANCO } from './banco.js';
+
+botonMudo($('#mudo'));
+
+// ---------- Clave del anfitrión: abre el banco cifrado ----------
+// Llega en el enlace (…/docente.html#docente=CLAVE); se guarda en la pestaña y se borra de la barra de direcciones.
+const u8 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
+async function abrir(clave) {
+  try {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(clave), 'PBKDF2', false, ['deriveKey']);
+    const llave = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: u8(BANCO.sal), iterations: 200000, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const banco = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u8(BANCO.iv) }, llave, u8(BANCO.d))));
+    sessionStorage.setItem('duelo-clave', clave);
+    return banco;
+  } catch {
+    return null;
+  }
+}
+const h = new URLSearchParams(location.hash.slice(1));
+if (h.has('docente')) history.replaceState(null, '', location.pathname + location.search);
+const dada = h.get('docente') || sessionStorage.getItem('duelo-clave');
+const PREGUNTAS = (dada && await abrir(dada)) || await new Promise((listo) => {
+  mostrar('v-clave');
+  if (dada) $('#c-err').textContent = 'Clave incorrecta.';
+  $('#f-clave').onsubmit = async (e) => {
+    e.preventDefault();
+    const banco = await abrir($('#c-clave').value.trim());
+    if (banco) return listo(banco);
+    $('#c-err').textContent = 'Clave incorrecta.';
+    $('#c-clave').select();
+  };
+});
+const PREGUNTA = Object.fromEntries(PREGUNTAS.map((q) => [q.id, q]));
+
+const uid = await entrar();
+let pin, sala, estado = {}, jugadores = {}, puntajes = {}, resp = {}, previo = {};
+let apagarResp, reloj, hecho = {};
+const Q = (i) => PREGUNTA[sala.orden[i].id];
+
+// ---------- Configuración ----------
+const disponibles = () => {
+  const b = $('#bloque').value, grupos = new Set();
+  const n = PREGUNTAS.filter((q) => (b === 'todas' || q.s == b) && (!q.g || !grupos.has(q.g) && grupos.add(q.g))).length;
+  $('#disponibles').textContent = `${n} preguntas distintas disponibles en este bloque.`;
+};
+$('#bloque').onchange = disponibles;
+disponibles();
+$('#crear').disabled = false;
+
+function elegir(bloque, n) {
+  const usados = new Set(), out = [];
+  for (const q of barajar(PREGUNTAS.filter((q) => bloque === 'todas' || q.s == bloque))) {
+    if (out.length === n) break;
+    if (q.g && usados.has(q.g)) continue; // dos preguntas del mismo grupo se delatan entre sí
+    if (q.g) usados.add(q.g);
+    out.push(q);
+  }
+  // Doble puntaje: la última y una al azar del tercio central.
+  const medio = Math.floor(out.length / 3 + Math.random() * (out.length / 3));
+  return out.map((q, i) => ({ id: q.id, p: q.tipo === 'vf' ? [0, 1] : barajar([0, 1, 2, 3]), d: i === out.length - 1 || i === medio }));
+}
+
+$('#crear').onclick = async () => {
+  $('#crear').disabled = true;
+  const orden = elegir($('#bloque').value, +$('#cantidad').value);
+  do pin = String(100000 + Math.floor(Math.random() * 900000));
+  while ((await get(r(pin))).exists());
+  await set(r(pin), { host: uid, creada: serverTimestamp(), orden, estado: { fase: 'lobby' } });
+  localStorage.setItem('duelo-pin', pin);
+  conectar();
+};
+
+const guardado = localStorage.getItem('duelo-pin');
+if (guardado) {
+  const s = (await get(r(guardado))).val();
+  if (s && s.host === uid && s.estado.fase !== 'final') {
+    $('#retomar').hidden = false;
+    $('#retomar').textContent = `Retomar la sala ${guardado}`;
+    $('#retomar').onclick = () => { pin = guardado; conectar(); };
+  }
+}
+mostrar('v-config');
+
+// ---------- Conexión: la pantalla se dibuja siempre a partir del estado guardado ----------
+async function conectar() {
+  sala = (await get(r(pin))).val();
+  const url = new URL(`./?pin=${pin}`, location.href).href;
+  $('#enlace').textContent = url.replace(/^https?:\/\//, '');
+  $('#qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=8&data=${encodeURIComponent(url)}`;
+  $('#qr').onerror = () => ($('#qr').hidden = true);
+  $('#pin').textContent = pin.replace(/(\d{3})/, '$1 ');
+  onValue(r(pin, 'jugadores'), (s) => { jugadores = s.val() || {}; pintarSala(); revisarTodos(); });
+  onValue(r(pin, 'puntajes'), (s) => (puntajes = s.val() || {}));
+  onValue(r(pin, 'estado'), (s) => { estado = s.val() || {}; pintar(); });
+}
+
+function pintarSala() {
+  const lista = Object.entries(jugadores);
+  $('#njug').textContent = lista.length;
+  $('#empezar').disabled = !lista.length;
+  $('#chips').innerHTML = lista.map(([id, j]) => `<li><button data-id="${id}">${esc(j.nombre)} ${esc(j.apellido)}</button></li>`).join('');
+}
+$('#chips').onclick = (e) => {
+  const id = e.target.closest('button')?.dataset.id, j = jugadores[id];
+  if (j && confirm(`¿Retirar a ${j.nombre} ${j.apellido} de la sala?`)) update(r(pin), { ['jugadores/' + id]: null, ['puntajes/' + id]: null });
+};
+
+function pintar() {
+  clearInterval(reloj);
+  apagarResp?.();
+  const f = estado.fase;
+  musica(f === 'lobby');
+  if (f === 'lobby') return mostrar('v-lobby');
+  if (!sala.orden[estado.i]) return; // sala borrada o estado incompleto
+  // La pantalla muestra lo mismo que reciben los jugadores: lo publicado en estado.
+  const q = estado, o = sala.orden[estado.i], total = sala.orden.length;
+  const num = `Pregunta ${estado.i + 1} de ${total}`;
+  if (f === 'intro') {
+    $('#i-num').textContent = num;
+    $('#i-doble').hidden = !o.d;
+    $('#i-texto').textContent = q.t;
+    mostrar('v-intro');
+    if (o.d) sonar.doble();
+    if (!hecho['i' + estado.qk]) {
+      hecho['i' + estado.qk] = setTimeout(() => estado.fase === 'intro' && iniciar(estado.i), o.d ? 6000 : 5000);
+    }
+  } else if (f === 'pregunta') {
+    $('#p-num').textContent = num;
+    $('#p-doble').hidden = !o.d;
+    $('#p-texto').textContent = q.t;
+    $('#p-ops').className = 'ops ops-' + q.tipo;
+    $('#p-ops').innerHTML = q.o.map((txt, k) => `<div class="${claseOp(q, k)}">${forma(q, k)}<span>${esc(txt)}</span></div>`).join('');
+    mostrar('v-pregunta');
+    apagarResp = onValue(r(pin, 'respuestas', estado.qk), (s) => { resp = s.val() || {}; $('#p-resp').textContent = Object.keys(resp).length; revisarTodos(); });
+    let ultimo = -1;
+    reloj = setInterval(() => {
+      const resta = estado.inicio + estado.dur - ahora(), seg = Math.max(0, Math.ceil(resta / 1000));
+      $('#p-seg').textContent = seg;
+      $('#p-arco').style.strokeDashoffset = 100 - Math.max(0, resta / estado.dur) * 100;
+      if (seg !== ultimo && seg <= 5 && seg > 0) sonar.tic(seg <= 3);
+      ultimo = seg;
+      if (resta <= 0) revelar();
+    }, 200);
+  } else if (f === 'revelar') pintarRevelar(q);
+  else if (f === 'ranking') pintarRanking();
+  else if (f === 'final') pintarFinal();
+}
+
+// Si ya respondieron todos, no hace falta esperar al reloj.
+function revisarTodos() {
+  const n = Object.keys(jugadores).length;
+  if (estado.fase === 'pregunta' && n && Object.keys(jugadores).every((id) => resp[id])) setTimeout(revelar, 700);
+}
+$('#saltar').onclick = () => revelar();
+
+// Los jugadores leen estado: al abrir la pregunta solo se publica lo que ven (enunciado y opciones en el
+// orden barajado). La correcta y los porqués se publican en revelar(), cuando la pregunta ya está cerrada.
+const intro = (i) => set(r(pin, 'estado'), { fase: 'intro', i, qk: 'q' + i, t: Q(i).t });
+const iniciar = (i) => {
+  const q = Q(i);
+  return set(r(pin, 'estado'), { fase: 'pregunta', i, qk: 'q' + i, inicio: serverTimestamp(), dur: duracion(q), t: q.t, tipo: q.tipo, o: sala.orden[i].p.map((k) => q.o[k]) });
+};
+$('#empezar').onclick = () => intro(0);
+
+// Puntaje: acierto = 500 a 1000 según rapidez (x2 si es doble) + 100 por cada acierto seguido (máx. +300). Error = 0.
+async function revelar() {
+  if (estado.fase !== 'pregunta' || hecho['r' + estado.qk]) return;
+  hecho['r' + estado.qk] = true;
+  const { i, qk, inicio, dur } = estado, o = sala.orden[i], q = Q(i), bueno = o.p.indexOf(q.c);
+  const rs = (await get(r(pin, 'respuestas', qk))).val() || {};
+  previo = Object.fromEntries(ranking(puntajes, jugadores).map((x, k) => [x.id, k]));
+  const cambios = { 'estado/fase': 'revelar', 'estado/c': bueno, 'estado/por': o.p.map((k) => q.por[k]), 'estado/exp': q.exp };
+  for (const id of Object.keys(jugadores)) {
+    const a = rs[id], ant = { pts: 0, racha: 0, aciertos: 0, ms: 0, ...puntajes[id] };
+    const dt = a ? Math.min(Math.max(a.t - inicio, 0), dur) : dur;
+    const ok = !!a && a.o === bueno, racha = ok ? ant.racha + 1 : 0;
+    const gan = ok ? Math.round(1000 * (1 - dt / dur / 2)) * (o.d ? 2 : 1) + Math.min(racha - 1, 3) * 100 : 0;
+    cambios['puntajes/' + id] = { pts: ant.pts + gan, racha, aciertos: ant.aciertos + (ok ? 1 : 0), ms: ant.ms + dt, ult: { i, o: a ? a.o : -1, ok, gan } };
+  }
+  await update(r(pin), cambios);
+}
+
+async function pintarRevelar(q) {
+  resp = (await get(r(pin, 'respuestas', estado.qk))).val() || {};
+  const bueno = q.c, cuenta = q.o.map(() => 0);
+  Object.values(resp).forEach((a) => cuenta[a.o]++);
+  const max = Math.max(1, ...cuenta), n = Object.keys(jugadores).length;
+  $('#r-texto').textContent = q.t;
+  $('#r-barras').innerHTML = q.o.map((txt, k) => `<div class="col ${k === bueno ? 'col-si' : 'col-no'}">
+      <b>${cuenta[k]}</b><i class="${claseOp(q, k).slice(3)}" style="height:${8 + (cuenta[k] / max) * 92}%"></i>
+      <div class="${claseOp(q, k)} etq">${forma(q, k)}<span>${esc(txt)}</span></div></div>`).join('');
+  $('#r-acertaron').textContent = `${cuenta[bueno]} de ${n} acertaron`;
+  $('#r-exp').textContent = q.exp;
+  const ultima = estado.i === sala.orden.length - 1;
+  $('#r-sig').textContent = ultima ? 'Ver el podio' : 'Ver ranking';
+  $('#r-sig').onclick = () => update(r(pin, 'estado'), { fase: ultima ? 'final' : 'ranking' });
+  mostrar('v-revelar');
+  sonar.revelar();
+}
+
+function pintarRanking() {
+  const lista = ranking(puntajes, jugadores), max = Math.max(1, lista[0]?.pts || 0);
+  $('#k-lista').innerHTML = lista.slice(0, 5).map((x, k) => {
+    const mov = previo[x.id] === undefined ? 0 : previo[x.id] - k;
+    return `<li style="--d:${k * 0.12}s"><span class="pos">${k + 1}</span><span class="nom">${esc(x.nombre)} ${esc(x.apellido)}
+      ${x.racha >= 3 ? `<em class="racha">${LLAMA}${x.racha}</em>` : ''}</span>
+      ${mov ? `<span class="mov ${mov > 0 ? 'sube' : 'baja'}">${FLECHA}${Math.abs(mov)}</span>` : '<span class="mov"></span>'}
+      <span class="bar"><i style="width:${(x.pts / max) * 100}%"></i></span><b>${x.pts}</b></li>`;
+  }).join('');
+  $('#k-sig').onclick = () => intro(estado.i + 1);
+  mostrar('v-ranking');
+}
+
+function pintarFinal() {
+  const lista = ranking(puntajes, jugadores), total = sala.orden.length;
+  const lugar = (x, n) => x ? `<div class="lugar l${n}" style="--d:${[0, 7.5, 4, 0.5][n]}s">
+      <p class="nom">${esc(x.nombre)}<br>${esc(x.apellido)}</p><p class="pts">${x.pts} pts</p><div class="base">${n}</div></div>` : '';
+  $('#podio').innerHTML = lugar(lista[1], 2) + lugar(lista[0], 1) + lugar(lista[2], 3);
+  $('#resto tbody').innerHTML = lista.slice(3).map((x, k) => `<tr><td>${k + 4}</td><td>${esc(x.nombre)} ${esc(x.apellido)}</td><td>${x.aciertos} de ${total}</td><td>${x.pts}</td></tr>`).join('');
+  $('#resto').hidden = lista.length <= 3;
+  mostrar('v-final');
+  if (hecho.final) return;
+  hecho.final = true;
+  // Suspenso: tercero, segundo y, con redoble largo, el primero.
+  sonar.redoble(0.5);
+  setTimeout(() => sonar.redoble(3.2), 1000);
+  setTimeout(() => sonar.redoble(3.2), 4500);
+  setTimeout(() => { sonar.fanfarria(); confeti(7000); }, 7600);
+  $('#csv').onclick = () => {
+    const filas = [['Puesto', 'Nombre', 'Apellido', 'Puntos', 'Aciertos', 'Preguntas', 'Tiempo total (s)'],
+      ...lista.map((x, k) => [k + 1, x.nombre, x.apellido, x.pts, x.aciertos, total, (x.ms / 1000).toFixed(1)])];
+    const csv = '﻿' + filas.map((f) => f.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `duelo-${pin}.csv` });
+    a.click();
+  };
+}
+$('#nueva').onclick = () => { localStorage.removeItem('duelo-pin'); location.reload(); };
+
+addEventListener('keydown', (e) => {
+  if (e.key !== ' ' && e.key !== 'Enter' && e.key !== 'ArrowRight') return;
+  const b = document.querySelector('main > section:not([hidden]) .sig, main > section:not([hidden]) #empezar');
+  if (b && !b.disabled) { e.preventDefault(); b.click(); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "rules": {
+    "salas": {
+      "$pin": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('host').val() === auth.uid) || data.child('host').val() === auth.uid)",
+        "jugadores": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('salas/' + $pin + '/host').exists() && root.child('salas/' + $pin + '/estado/fase').val() !== 'final'",
+            ".validate": "newData.hasChildren(['nombre', 'apellido'])",
+            "nombre": { ".validate": "newData.isString() && newData.val().matches(/^[^<>&\"]{2,24}$/)" },
+            "apellido": { ".validate": "newData.isString() && newData.val().matches(/^[^<>&\"]{2,24}$/)" },
+            "$otro": { ".validate": false }
+          }
+        },
+        "respuestas": {
+          "$qk": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('salas/' + $pin + '/jugadores/' + $uid).exists() && root.child('salas/' + $pin + '/estado/fase').val() === 'pregunta' && root.child('salas/' + $pin + '/estado/qk').val() === $qk && now <= root.child('salas/' + $pin + '/estado/inicio').val() + root.child('salas/' + $pin + '/estado/dur').val() + 1500",
+              ".validate": "newData.hasChildren(['o', 't'])",
+              "o": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+              "t": { ".validate": "newData.val() === now" },
+              "$otro": { ".validate": false }
+            }
+          }
+        }
+      }
+    }
+  }
+}

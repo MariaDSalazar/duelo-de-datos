@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Duelo de Datos</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body class="jugador">
+<div class="fondo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<header id="yo" class="yo" hidden><span id="yo-nom"></span><b id="yo-pts">0</b></header>
+<button id="mudo" class="mudo" aria-label="Silenciar o activar sonido"></button>
+<main>
+  <section id="v-registro">
+    <h1 class="sello">Duelo de Datos</h1>
+    <form id="form" class="panel" novalidate>
+      <label>PIN de la sala<input id="f-pin" inputmode="numeric" maxlength="6" autocomplete="off" required></label>
+      <label>Nombre<input id="f-nom" maxlength="24" autocomplete="given-name" required></label>
+      <label>Apellido<input id="f-ape" maxlength="24" autocomplete="family-name" required></label>
+      <p id="f-err" class="err" role="alert"></p>
+      <button class="btn" disabled>Entrar al duelo</button>
+    </form>
+  </section>
+
+  <section id="v-espera" hidden><div id="espera" class="espera"></div></section>
+
+  <section id="v-intro" hidden>
+    <p id="i-num" class="num"></p>
+    <p id="i-doble" class="sello doble" hidden>Doble puntaje</p>
+    <h2 id="i-texto" class="enunciado"></h2>
+    <div class="carga"><i></i></div>
+  </section>
+
+  <section id="v-pregunta" hidden>
+    <div class="tiempo"><i id="p-barra"></i></div>
+    <h2 id="p-texto" class="enunciado"></h2>
+    <div id="p-ops" class="ops"></div>
+  </section>
+
+  <section id="v-resultado" hidden><div id="resultado"></div></section>
+
+  <section id="v-final" hidden><div id="final" class="final-j"></div></section>
+</main>
+
+<script type="module">
+import { entrar, r, set, get, onValue, serverTimestamp, ahora, $, esc, mostrar, claseOp, forma, ranking, sonar, botonMudo } from './comun.js';
+import { STICKERS, CHECK, LLAMA, medalla } from './arte.js';
+
+botonMudo($('#mudo'));
+const uid = await entrar();
+let pin, orden, estado = {}, yo = null, puntajes = {}, jugadores = {}, dibujado, enviado = {};
+const params = new URLSearchParams(location.search);
+$('#f-pin').value = params.get('pin') || localStorage.getItem('duelo-jugador-pin') || '';
+
+// Si este celular ya estaba en la sala (recarga, pantalla bloqueada), vuelve directo al juego.
+if ($('#f-pin').value) {
+  const s = (await get(r($('#f-pin').value))).val();
+  if (s?.jugadores?.[uid]) conectar($('#f-pin').value, s);
+  else mostrar('v-registro');
+} else mostrar('v-registro');
+
+const limpio = (s) => s.normalize('NFC').trim().replace(/\s+/g, ' ');
+const nombreValido = (s) => /^\p{L}[\p{L}' -]{1,23}$/u.test(s);
+const titulo = (s) => s.toLocaleLowerCase('es').replace(/(^|[\s'-])(\p{L})/gu, (_, a, b) => a + b.toLocaleUpperCase('es'));
+const clave = (n, a) => (n + ' ' + a).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+
+$('#form').onsubmit = async (e) => {
+  e.preventDefault();
+  const err = (m) => ($('#f-err').textContent = m);
+  const p = $('#f-pin').value.trim(), nombre = titulo(limpio($('#f-nom').value)), apellido = titulo(limpio($('#f-ape').value));
+  if (!/^\d{6}$/.test(p)) return err('El PIN tiene 6 números: míralo en la pantalla del proyector.');
+  if (!nombreValido(nombre) || !nombreValido(apellido)) return err('Escribe tu nombre y tu apellido reales: solo letras, de 2 a 24.');
+  const btn = e.submitter;
+  btn.disabled = true;
+  try {
+    const s = (await get(r(p))).val();
+    if (!s) return err('No hay ninguna sala con ese PIN.');
+    if (s.estado.fase === 'final') return err('Esa partida ya terminó.');
+    const repetido = Object.entries(s.jugadores || {}).some(([id, j]) => id !== uid && clave(j.nombre, j.apellido) === clave(nombre, apellido));
+    if (repetido) return err('Ya hay alguien con ese nombre y apellido en la sala.');
+    await set(r(p, 'jugadores', uid), { nombre, apellido });
+    localStorage.setItem('duelo-jugador-pin', p);
+    sonar.acierto(); // además desbloquea el audio en el celular
+    conectar(p, s);
+  } catch {
+    err('No se pudo entrar. Revisa tu conexión e inténtalo de nuevo.');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+function conectar(p, s) {
+  pin = p;
+  orden = s.orden;
+  let estuvo = false;
+  onValue(r(pin, 'jugadores', uid), (x) => {
+    yo = x.val();
+    if (yo) {
+      estuvo = true;
+      $('#yo').hidden = false;
+      $('#yo-nom').textContent = `${yo.nombre} ${yo.apellido}`;
+      pintar();
+    } else if (estuvo) location.replace(`./?pin=${pin}&retirado=1`);
+  });
+  onValue(r(pin, 'jugadores'), (x) => (jugadores = x.val() || {}));
+  onValue(r(pin, 'puntajes'), (x) => { puntajes = x.val() || {}; $('#yo-pts').textContent = puntajes[uid]?.pts || 0; pintar(); });
+  onValue(r(pin, 'estado'), (x) => { estado = x.val() || {}; pintar(); });
+}
+// El botón nace deshabilitado: si se envía antes de conectar, el formulario recargaría la página.
+$('#form .btn').disabled = false;
+if (params.get('retirado')) $('#f-err').textContent = 'El anfitrión te retiró de la sala. Revisa tu nombre y vuelve a entrar.';
+
+function espera(html) {
+  $('#espera').innerHTML = html;
+  mostrar('v-espera');
+}
+
+function pintar() {
+  const f = estado.fase, mio = puntajes[uid];
+  const listo = f === 'revelar' ? mio?.ult?.i === estado.i : true;
+  const llave = `${f}|${estado.qk}|${listo}|${f === 'ranking' || f === 'final' ? mio?.pts : ''}|${yo?.nombre}`;
+  if (llave === dibujado || !f) return;
+  dibujado = llave;
+  if (f === 'lobby') return espera(`<h2>¡Estás dentro, ${esc(yo?.nombre || '')}!</h2><p>Mira la pantalla del proyector.<br>El duelo empieza en cualquier momento.</p><div class="puntos-carga"><i></i><i></i><i></i></div>`);
+  if (f === 'ranking') return espera(posicion());
+  if (f === 'final') return final();
+  // El anfitrión publica en estado solo lo que se ve; la correcta (c) y los porqués llegan al revelar.
+  const o = orden[estado.i], q = estado;
+  if (!o) return;
+  if (f === 'intro') {
+    $('#i-num').textContent = `Pregunta ${estado.i + 1} de ${orden.length}`;
+    $('#i-doble').hidden = !o.d;
+    $('#i-texto').textContent = q.t;
+    mostrar('v-intro');
+  } else if (f === 'pregunta') preguntar(q, o);
+  else if (f === 'revelar') listo ? resultado(q, o, mio.ult) : espera('<h2>Calculando puntajes...</h2>');
+}
+
+async function preguntar(q, o) {
+  const qk = estado.qk;
+  if (enviado[qk] || (await get(r(pin, 'respuestas', qk, uid))).exists()) return espera('<h2>Respuesta enviada</h2><p>Espera a que se cierre la pregunta.</p><div class="puntos-carga"><i></i><i></i><i></i></div>');
+  $('#p-texto').textContent = q.t;
+  $('#p-ops').className = 'ops ops-' + q.tipo;
+  $('#p-ops').innerHTML = q.o.map((txt, k) => `<button class="${claseOp(q, k)}" data-k="${k}">${forma(q, k)}<span>${esc(txt)}</span></button>`).join('');
+  const barra = $('#p-barra'), resta = Math.max(0, estado.inicio + estado.dur - ahora());
+  barra.style.transition = 'none';
+  barra.style.width = (resta / estado.dur) * 100 + '%';
+  requestAnimationFrame(() => requestAnimationFrame(() => { barra.style.transition = `width ${resta}ms linear`; barra.style.width = '0%'; }));
+  mostrar('v-pregunta');
+  $('#p-ops').onclick = async (e) => {
+    const b = e.target.closest('button');
+    if (!b || enviado[qk]) return;
+    enviado[qk] = true;
+    espera('<h2>Respuesta enviada</h2><p>Espera a que se cierre la pregunta.</p><div class="puntos-carga"><i></i><i></i><i></i></div>');
+    try {
+      await set(r(pin, 'respuestas', qk, uid), { o: +b.dataset.k, t: serverTimestamp() });
+    } catch {
+      espera('<h2>Se acabó el tiempo</h2><p>Tu respuesta llegó tarde. En la siguiente, ¡más rápido!</p>');
+    }
+  };
+}
+
+function resultado(q, o, ult) {
+  const opc = (k) => `<p class="${claseOp(q, k)} op-mini">${forma(q, k)}<span>${esc(q.o[k])}</span></p>`;
+  if (ult.ok) {
+    sonar.acierto();
+    $('#resultado').innerHTML = `<div class="ok"><div class="check">${CHECK}</div><h2>COMMIT exitoso</h2><p class="gan">+${ult.gan}</p>
+      ${puntajes[uid].racha >= 2 ? `<p class="racha">${LLAMA} Racha de ${puntajes[uid].racha} aciertos</p>` : ''}
+      ${o.d ? '<p class="chip-doble">Doble puntaje</p>' : ''}<p class="exp">${esc(q.exp)}</p></div>`;
+  } else {
+    sonar.error();
+    const sinResp = ult.o < 0, [svg, leyenda] = sinResp ? STICKERS[7] : STICKERS[Math.floor(Math.random() * 7)];
+    $('#resultado').innerHTML = `<div class="mal">
+      <div class="sticker" style="--giro:${Math.random() * 16 - 8}deg">${svg}<span>${leyenda}</span></div>
+      <div class="tarjeta">
+        ${sinResp ? '<p class="etq">No alcanzaste a responder</p>' : `<p class="etq">Elegiste</p>${opc(ult.o)}<p class="etq">Por qué no</p><p class="por">${esc(q.por[ult.o])}</p>`}
+        <p class="etq">La correcta</p>${opc(q.c)}
+        <p class="exp">${esc(q.exp)}</p>
+      </div></div>`;
+  }
+  mostrar('v-resultado');
+}
+
+function posicion() {
+  const lista = ranking(puntajes, jugadores), k = lista.findIndex((x) => x.id === uid);
+  if (k < 0) return '<h2>Mira el ranking en el proyector</h2>';
+  const falta = k ? lista[k - 1].pts - lista[k].pts : 0;
+  return `<p class="etq">Vas en el puesto</p><p class="puesto">${k + 1}<small> de ${lista.length}</small></p><p class="gan">${lista[k].pts} pts</p>
+    <p>${k ? `Estás a <b>${falta}</b> puntos del puesto ${k}. ¡Tú puedes!` : '¡Vas primero! Defiende el lugar.'}</p>`;
+}
+
+function final() {
+  const lista = ranking(puntajes, jugadores), k = lista.findIndex((x) => x.id === uid), yo = lista[k];
+  if (!yo) return espera('<h2>La partida terminó</h2>');
+  const msg = ['¡Primer lugar!', '¡Segundo lugar!', '¡Tercer lugar!'][k] || '¡Buen duelo!';
+  $('#final').innerHTML = `${k < 3 ? `<div class="medalla">${medalla(k + 1)}</div>` : `<p class="puesto">${k + 1}<small> de ${lista.length}</small></p>`}
+    <h2>${msg}</h2><p class="gan">${yo.pts} pts</p><p>${yo.aciertos} de ${orden.length} respuestas correctas</p>
+    ${k >= 3 ? `<p>Te faltaron <b>${lista[2].pts - yo.pts}</b> puntos para el podio.</p>` : ''}<p class="tenue">Mira el podio en el proyector.</p>`;
+  mostrar('v-final');
+  if (k < 3) sonar.fanfarria();
+}
+
+// Si el tiempo se acaba en el celular antes de responder, se bloquean los botones.
+setInterval(() => {
+  if (estado.fase === 'pregunta' && !enviado[estado.qk] && !$('#v-pregunta').hidden && estado.inicio + estado.dur - ahora() < -1500) {
+    enviado[estado.qk] = true;
+    espera('<h2>Se acabó el tiempo</h2><p>Espera la respuesta correcta.</p>');
+  }
+}, 500);
+</script>
+</body>
+</html>
