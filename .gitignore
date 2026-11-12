@@ -2,3 +2,7 @@ preguntas.json
 CLAVE-DOCENTE.txt
 node_modules/
 *-debug.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
